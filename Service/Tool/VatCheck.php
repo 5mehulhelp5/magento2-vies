@@ -56,6 +56,8 @@ class VatCheck implements ToolInterface
     /**
      * JSON Schema. Note that the model fills in every parameter it is shown, whether or not the
      * question called for one, so only offer parameters that are always safe to receive.
+     *
+     * @return array<string,mixed>
      */
     public function getParameterSchema(): array
     {
@@ -80,6 +82,8 @@ class VatCheck implements ToolInterface
      * Reading an order needs the same permission the admin would need to view it. An empty input has
      * to resolve to the most restrictive resource the tool can reach: the check runs before the
      * arguments are known to be harmless.
+     *
+     * @param array<string,mixed> $input
      */
     public function getMagentoAcl(array $input = []): string
     {
@@ -91,6 +95,9 @@ class VatCheck implements ToolInterface
         return true;
     }
 
+    /**
+     * @param array<string,mixed> $input
+     */
     public function isReadOnlyAction(array $input): bool
     {
         return true;
