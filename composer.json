@@ -2,12 +2,13 @@
     "name": "mago-assistant/magento2-vies",
     "description": "Example Mago Assistant skill: validate an EU VAT number through VIES",
     "type": "magento2-module",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "license": "MIT",
     "require": {
         "php": "~8.2.0||~8.3.0||~8.4.0||~8.5.0",
         "magento/framework": "^103.0",
-        "mago-assistant/mago": "*"
+        "magento/module-sales": "^103.0",
+        "mago-assistant/mago": "^2.0"
     },
     "autoload": {
         "files": [
