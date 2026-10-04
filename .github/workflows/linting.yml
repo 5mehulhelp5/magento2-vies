@@ -1,0 +1,23 @@
+name: Lint PHP files
+
+on: [push, pull_request, workflow_dispatch]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  php-83:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: prestashop/github-action-php-lint/8.3@v2.3.1
+
+  php-84:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: prestashop/github-action-php-lint/8.4@v2.3.1
+
+  php-85:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: prestashop/github-action-php-lint/8.5@08f47878fdedbcecb581a8c93f507c7d60b2c956
