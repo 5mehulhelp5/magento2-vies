@@ -4,7 +4,6 @@
     <module name="MagoAssistant_Vies">
         <sequence>
             <module name="MagoAssistant_Mago"/>
-            <module name="Magento_Sales"/>
         </sequence>
     </module>
 </config>

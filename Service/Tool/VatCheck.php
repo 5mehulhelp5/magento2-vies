@@ -6,10 +6,9 @@ declare(strict_types=1);
 
 namespace MagoAssistant\Vies\Service\Tool;
 
-use Magento\Framework\Api\SearchCriteriaBuilder;
 use Magento\Framework\HTTP\Client\CurlFactory;
 use Magento\Framework\Serialize\Serializer\Json;
-use Magento\Sales\Api\OrderRepositoryInterface;
+use MagoAssistant\Mago\Api\Acl;
 use MagoAssistant\Mago\Api\Tool\ToolInterface;
 use MagoAssistant\Mago\Service\Privacy\PiiClass;
 
@@ -42,9 +41,7 @@ class VatCheck implements ToolInterface
 
     public function __construct(
         private readonly CurlFactory $curlFactory,
-        private readonly Json $json,
-        private readonly OrderRepositoryInterface $orderRepository,
-        private readonly SearchCriteriaBuilder $searchCriteriaBuilder
+        private readonly Json $json
     ) {
     }
 
@@ -63,9 +60,9 @@ class VatCheck implements ToolInterface
      */
     public function getDescription(): string
     {
-        return 'Validate an EU VAT number against VIES, the European Commission register. '
-            . 'Either pass a vat_number directly, or pass an order_number to check the VAT number on '
-            . 'that order\'s billing address. Answers whether the number is registered and, if the '
+        return 'Validate an EU VAT number against VIES, the European Commission register. Pass the '
+            . 'number itself. To check the number on an order, first read the order with order_manager '
+            . '(get_document) and pass its vat_id. Answers whether the number is registered and, if the '
             . 'member state shares them, the registered company name and address.';
     }
 
@@ -82,28 +79,24 @@ class VatCheck implements ToolInterface
             'properties' => [
                 'vat_number' => [
                     'type' => 'string',
-                    'description' => 'VAT number including its country prefix, e.g. "NL810433941B01". '
-                        . 'Leave out when passing an order_number instead.',
-                ],
-                'order_number' => [
-                    'type' => 'string',
-                    'description' => 'Order increment id, e.g. "000000563". The VAT number is read '
-                        . 'from that order\'s billing address. Leave out when passing a vat_number.',
+                    'description' => 'VAT number including its country prefix, e.g. "NL123456789B01"',
                 ],
             ],
+            'required' => ['vat_number'],
         ];
     }
 
     /**
-     * Reading an order needs the same permission the admin would need to view it. An empty input has
-     * to resolve to the most restrictive resource the tool can reach: the check runs before the
-     * arguments are known to be harmless.
+     * This tool reads nothing from Magento, so no Magento resource fits it. MAGO_PER_USER hands the
+     * decision to the assistant's own per-user grants: the tool is off for every admin until it is
+     * allowed under Stores > Admin Assistant > Skills & Permissions. The data a check needs (the VAT
+     * number on an order) is read through order_manager, which carries the Sales resource itself.
      *
      * @param array<string,mixed> $input
      */
     public function getMagentoAcl(array $input = []): string
     {
-        return 'Magento_Sales::actions_view';
+        return Acl::MAGO_PER_USER;
     }
 
     public function isReadOnly(): bool
@@ -142,7 +135,6 @@ class VatCheck implements ToolInterface
             'vat_number' => [PiiClass::TOKENISE, 'vat'],
             'country_code' => [PiiClass::PUBLIC],
             'request_date' => [PiiClass::PUBLIC],
-            'order_number' => [PiiClass::PUBLIC],
             'name' => [PiiClass::TOKENISE, 'name'],
             'address' => [PiiClass::TOKENISE, 'address'],
         ];
@@ -167,19 +159,9 @@ class VatCheck implements ToolInterface
      */
     public function execute(array $params): array
     {
-        $orderNumber = $this->stringParam($params, 'order_number');
         $vatNumber = $this->normalise($this->stringParam($params, 'vat_number'));
-
-        if ($vatNumber === '' && $orderNumber !== '') {
-            $fromOrder = $this->vatNumberOnOrder($orderNumber);
-            if (!isset($fromOrder['vat_number'])) {
-                return $fromOrder;
-            }
-            $vatNumber = $fromOrder['vat_number'];
-        }
-
         if ($vatNumber === '') {
-            return ['error' => 'vies_vat_check needs either a vat_number or an order_number'];
+            return ['error' => 'vies_vat_check needs a vat_number'];
         }
 
         // Check the shape before anything leaves the shop. The input is not echoed in the error:
@@ -189,9 +171,8 @@ class VatCheck implements ToolInterface
         if (!in_array($countryCode, self::MEMBER_STATES, true)
             || preg_match('/^[A-Z0-9]{2,12}$/', $number) !== 1
         ) {
-            return ['error' => ($orderNumber !== '' ? 'The VAT number on order ' . $orderNumber . ' is not' : 'Not')
-                . ' an EU VAT number: it must start with a member-state prefix such as NL or DE, followed by 2 '
-                . 'to 12 letters or digits'];
+            return ['error' => 'Not an EU VAT number: it must start with a member-state prefix such as NL or '
+                . 'DE, followed by 2 to 12 letters or digits'];
         }
 
         $result = $this->ask($countryCode, $number);
@@ -204,7 +185,6 @@ class VatCheck implements ToolInterface
             'vat_number' => $countryCode . $number,
             'country_code' => $this->tidy($result['countryCode'] ?? ''),
             'request_date' => $this->tidy($result['requestDate'] ?? ''),
-            'order_number' => $orderNumber !== '' ? $orderNumber : null,
             'name' => $this->tidy($result['name'] ?? ''),
             'address' => $this->tidy($result['address'] ?? ''),
         ];
@@ -265,42 +245,6 @@ class VatCheck implements ToolInterface
         }
 
         return $decoded;
-    }
-
-    /**
-     * The VAT number on the order's billing address. Customers often type it without its country
-     * prefix, so the billing country is put in front when it is missing.
-     *
-     * @return array{vat_number: string}|array{error: string}
-     */
-    private function vatNumberOnOrder(string $incrementId): array
-    {
-        // Increment ids are only unique per store, so ask for two to notice a clash.
-        $criteria = $this->searchCriteriaBuilder
-            ->addFilter('increment_id', $incrementId)
-            ->setPageSize(2)
-            ->create();
-        $orders = $this->orderRepository->getList($criteria)->getItems();
-
-        if ($orders === []) {
-            return ['error' => 'Order ' . $incrementId . ' not found'];
-        }
-        if (count($orders) > 1) {
-            return ['error' => 'More than one store has an order ' . $incrementId
-                . ', so it is unclear which VAT number is meant'];
-        }
-
-        $address = reset($orders)->getBillingAddress();
-        $vatNumber = $this->normalise((string)$address?->getVatId());
-        if ($vatNumber === '') {
-            return ['error' => 'Order ' . $incrementId . ' has no VAT number on its billing address'];
-        }
-
-        if (preg_match('/^[A-Z]{2}/', $vatNumber) !== 1) {
-            $vatNumber = strtoupper((string)$address?->getCountryId()) . $vatNumber;
-        }
-
-        return ['vat_number' => $vatNumber];
     }
 
     /**
