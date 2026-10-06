@@ -28,6 +28,7 @@ jobs:
 
       # Core has no tagged release yet, so it comes off Packagist's dev-main; its own AI base
       # dependency is unreleased too and needs the same alias core's CI uses. Drop both once tagged.
+      # The LM Studio platform is only a suggestion of core's, installed here as core's own CI does.
       - name: Install Mago core and its AI base dependency
         run: |
           docker exec magento composer config repositories.mage-os-ai-base vcs https://github.com/mage-os-lab/module-ai-base

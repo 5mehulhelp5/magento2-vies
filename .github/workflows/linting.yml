@@ -20,4 +20,5 @@ jobs:
   php-85:
     runs-on: ubuntu-latest
     steps:
+      # No release of the action covers 8.5 yet, so this pins the commit that adds it.
       - uses: prestashop/github-action-php-lint/8.5@08f47878fdedbcecb581a8c93f507c7d60b2c956

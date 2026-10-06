@@ -217,8 +217,9 @@ class VatCheck implements ToolInterface
             $body = $curl->getBody();
         } catch (\Throwable $e) {
             // The register is regularly unavailable for one member state at a time. An error the
-            // model can read beats an exception the administrator never sees.
-            return ['error' => 'Could not reach VIES: ' . $e->getMessage()];
+            // model can read beats an exception the administrator never sees. The exception's own
+            // text stays out of it, like every other free text from the transport.
+            return ['error' => 'Could not reach VIES'];
         }
 
         try {

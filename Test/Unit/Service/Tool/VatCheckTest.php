@@ -173,7 +173,28 @@ class VatCheckTest extends TestCase
 
         $result = $this->tool()->execute(['vat_number' => 'DE123456789']);
 
-        self::assertSame('Could not reach VIES: timed out', $result['error']);
+        self::assertSame('Could not reach VIES', $result['error']);
+    }
+
+    #[Test]
+    public function aValidUserErrorIsAnAnswerNotAnError(): void
+    {
+        $this->viesAnswers(['valid' => true, 'countryCode' => 'DE', 'userError' => 'VALID']);
+
+        $result = $this->tool()->execute(['vat_number' => 'DE123456789']);
+
+        self::assertTrue($result['valid']);
+        self::assertArrayNotHasKey('error', $result);
+    }
+
+    #[Test]
+    public function aFreeTextUserErrorDoesNotReachTheModel(): void
+    {
+        $this->viesAnswers(['valid' => false, 'userError' => 'Service down, contact <script>']);
+
+        $result = $this->tool()->execute(['vat_number' => 'DE123456789']);
+
+        self::assertSame('VIES could not answer: unknown error', $result['error']);
     }
 
     #[Test]
