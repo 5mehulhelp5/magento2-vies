@@ -1,0 +1,23 @@
+name: CodeSniffer
+
+on: [push, pull_request, workflow_dispatch]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codesniffer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run CodeSniffer
+        run:
+          docker run
+          --volume $(pwd)/:/app/workdir
+          michielgerritsen/magento-coding-standard:latest
+          --severity=9
+          --standard=/app/workdir/phpcs.xml
+          -s
+          --ignore-annotations

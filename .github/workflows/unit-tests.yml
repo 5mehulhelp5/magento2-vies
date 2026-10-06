@@ -1,0 +1,94 @@
+name: Unit Tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compute_matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.merged.outputs.matrix }}
+    steps:
+      - uses: graycoreio/github-actions-magento2/supported-version@v8.10.0
+        id: mage_os
+        with:
+          kind: latest
+          project: mage-os
+          include_services: false
+
+      - uses: graycoreio/github-actions-magento2/supported-version@v8.10.0
+        id: magento_open_source
+        with:
+          kind: latest
+          project: magento-open-source
+          include_services: false
+
+      # The action covers one project per run, so both results are concatenated into a single
+      # `magento` dimension whose include entries carry that entry's php and composer version.
+      - name: Merge both projects into one matrix
+        id: merged
+        env:
+          MAGE_OS: ${{ steps.mage_os.outputs.matrix }}
+          MAGENTO_OPEN_SOURCE: ${{ steps.magento_open_source.outputs.matrix }}
+        run: |
+          echo "matrix=$(jq -cn --argjson a "$MAGE_OS" --argjson b "$MAGENTO_OPEN_SOURCE" \
+            '{magento: ($a.magento + $b.magento), include: ($a.include + $b.include)}')" >> "$GITHUB_OUTPUT"
+
+  unit-test:
+    needs: compute_matrix
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.compute_matrix.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: graycoreio/github-actions-magento2/setup-magento@v8.10.0
+        id: setup-magento
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer:v${{ matrix.composer }}
+          mode: extension
+          magento_version: ${{ matrix.magento }}
+          # mirror.mage-os.org, the action's default, carries magento/* but no mage-os/* at all.
+          magento_repository: ${{ startsWith(matrix.magento, 'mage-os/') && 'https://repo.mage-os.org/' || 'https://mirror.mage-os.org/' }}
+
+      # Mago core has no tagged release yet, so it comes off Packagist's dev-main; its AI base
+      # dependency is unreleased too and needs the inline alias core's own CI uses. Drop both once
+      # they are tagged.
+      - name: Add the add-on, Mago core and its unreleased AI base dependency
+        working-directory: ${{ steps.setup-magento.outputs.path }}
+        run: |
+          composer config repositories.local path "$GITHUB_WORKSPACE"
+          composer require --no-install "mago-assistant/magento2-vies:@dev" "mago-assistant/magento2-mago:dev-main" "mage-os/module-ai-base:dev-main as 1.0.0"
+
+      - uses: graycoreio/github-actions-magento2/cache-magento@v8.10.0
+        with:
+          working-directory: ${{ steps.setup-magento.outputs.path }}
+          composer_cache_key: unit-tests | ${{ matrix.magento }}
+
+      - name: Composer install
+        working-directory: ${{ steps.setup-magento.outputs.path }}
+        run: composer install
+        env:
+          COMPOSER_MIRROR_PATH_REPOS: 1
+
+      - name: Register the extension's unit tests
+        working-directory: ${{ steps.setup-magento.outputs.path }}
+        run: |
+          cat > /tmp/testsuite.xml << 'EOF'
+                  <testsuite name="MagoAssistant_Vies_Unit_Tests">
+                      <directory>../../../vendor/mago-assistant/magento2-vies/Test/Unit</directory>
+                  </testsuite>
+          EOF
+          sed -i '/<testsuites>/r /tmp/testsuite.xml' dev/tests/unit/phpunit.xml.dist
+          sed -i '/<extensions>/,/<\/extensions>/d' dev/tests/unit/phpunit.xml.dist
+
+      - name: Run unit tests
+        working-directory: ${{ steps.setup-magento.outputs.path }}
+        run: vendor/bin/phpunit -c dev/tests/unit/phpunit.xml.dist --testsuite MagoAssistant_Vies_Unit_Tests
